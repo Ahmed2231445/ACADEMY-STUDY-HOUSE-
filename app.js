@@ -303,6 +303,69 @@ async function deleteCommunityMessage(courseKey, index, username) {
 }
 
 
+
+/* ===== نظام قفل السيرفر عند تعطل الاتصال (صيانة) ===== */
+let serverLockOverlay = null;
+let serverIsDown = false;
+
+function createServerLockOverlay() {
+  const overlay = document.createElement("div");
+  overlay.id = "serverLockOverlay";
+  overlay.style.cssText = `
+    position:fixed; inset:0; z-index:1000000; display:none;
+    align-items:center; justify-content:center;
+    background:rgba(20,14,11,0.96); backdrop-filter:blur(10px);
+    color:#fff; text-align:center; padding:20px;
+  `;
+  overlay.innerHTML = `
+    <div style="max-width:380px;">
+      <div style="font-size:2.8rem; margin-bottom:16px;">🔒</div>
+      <h2 style="margin:0 0 10px; font-size:1.25rem;">جارٍ إصلاح السيرفر</h2>
+      <p style="margin:0 0 22px; color:#d6cdc4; line-height:1.7; font-size:0.92rem;">
+        السيرفر يخضع حاليًا للصيانة، برجاء الانتظار.<br>
+        قد تستغرق العملية بعض الساعات.
+      </p>
+      <button id="serverLockRetryBtn" style="
+        padding:14px 30px; border-radius:999px; border:none;
+        background:linear-gradient(135deg,#e3a335,#c9821f);
+        color:#fff; font-weight:800; font-size:1rem; cursor:pointer;
+      ">إعادة المحاولة</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.querySelector("#serverLockRetryBtn").addEventListener("click", () => {
+    location.reload();
+  });
+  return overlay;
+}
+
+function showServerLock() {
+  if (serverIsDown) return;
+  serverIsDown = true;
+  if (!serverLockOverlay) serverLockOverlay = createServerLockOverlay();
+  serverLockOverlay.style.display = "flex";
+}
+
+function hideServerLock() {
+  if (!serverIsDown) return;
+  serverIsDown = false;
+  if (serverLockOverlay) serverLockOverlay.style.display = "none";
+}
+
+/* غلاف موحّد لأي طلب متصل بسيرفر جوجل سكريبت */
+async function serverFetch(url, options) {
+  try {
+    const res = await fetch(url, options);
+    if (!res.ok) throw new Error("server_error_" + res.status);
+    hideServerLock();
+    return res;
+  } catch (err) {
+    showServerLock();
+    throw err;
+  }
+}
+
+
 /* ===== Shared short-TTL request cache ===== */
 const _requestCache = new Map();
 function cachedFetchText(url, ttlMs = 4000) {
@@ -1696,6 +1759,7 @@ const appPronunciationContent = document.getElementById("appPronunciationContent
   let examsData = null;
   let activeExamCourse = null;
   let currentExam = null;
+  let hiddenAt = null;
   let examAnswers = [];
   let examCurrentQuestionIndex = 0;
   let examTimeLeftSeconds = 0;
@@ -2604,7 +2668,7 @@ if (appPronunciationLink) {
 // استدعاء تحديث النص عند التحميل
   updateAIPulseText();
 
-  /* ===== نظام قفل الموقع عند عدم النشاط ===== */
+  /* ===== نظام قفل الموقع عند عدم النشاط (فقط في الأقسام المستهلكة للطلبات) ===== */
   const IDLE_LOCK_MS = 40000;
   const HIDDEN_LOCK_MS = 40000;
   let idleLockTimer = null;
@@ -2614,6 +2678,11 @@ if (appPronunciationLink) {
 
   function isVideoCurrentlyPlaying() {
     return !!window.__siteVideoOpen || currentAppSection === "session";
+  }
+
+  // القسم يعتبر "ثقيل" (بيستهلك طلبات بشكل مستمر) لو المستخدم فاتح شات مجتمع فعليًا
+  function isRequestHeavySection() {
+    return !!activeCommunityCourse;
   }
 
   function createIdleLockOverlay() {
@@ -2650,6 +2719,7 @@ if (appPronunciationLink) {
   function lockSiteDueToInactivity() {
     if (siteLocked) return;
     if (isVideoCurrentlyPlaying()) return;
+    if (!isRequestHeavySection()) return; // صفحة خفيفة، مفيش داعي نقفل
 
     siteLocked = true;
     stopCommunityPolling();
@@ -2664,10 +2734,12 @@ if (appPronunciationLink) {
   function resetIdleTimer() {
     if (siteLocked) return;
     clearTimeout(idleLockTimer);
+    if (!isRequestHeavySection()) return; // مفيش بولينج شغال، مفيش داعي نبدأ عداد
+
     idleLockTimer = setTimeout(() => {
       if (isVideoCurrentlyPlaying()) {
         resetIdleTimer();
-      } else {
+      } else if (isRequestHeavySection()) {
         lockSiteDueToInactivity();
       }
     }, IDLE_LOCK_MS);
@@ -2680,14 +2752,29 @@ if (appPronunciationLink) {
 
   document.addEventListener("visibilitychange", () => {
     if (siteLocked) return;
+
     if (document.hidden) {
+      hiddenAt = Date.now();
       clearTimeout(hiddenLockTimer);
+      // خرج لتاب تاني: لو القسم ثقيل، الطلبات (البولينج) بتتوقف فورًا
+      // عن طريق stopCommunityPolling() اللي شغالة بالفعل في listener المجتمع.
+      if (!isRequestHeavySection()) return; // مفيش طلبات أصلاً، مفيش داعي نعمل حاجة
+
       hiddenLockTimer = setTimeout(() => {
-        if (!isVideoCurrentlyPlaying()) lockSiteDueToInactivity();
+        if (!isVideoCurrentlyPlaying() && isRequestHeavySection()) lockSiteDueToInactivity();
       }, HIDDEN_LOCK_MS);
     } else {
       clearTimeout(hiddenLockTimer);
-      resetIdleTimer();
+      const elapsedHidden = hiddenAt ? (Date.now() - hiddenAt) : 0;
+      hiddenAt = null;
+
+      if (elapsedHidden >= HIDDEN_LOCK_MS && !isVideoCurrentlyPlaying() && isRequestHeavySection()) {
+        lockSiteDueToInactivity();
+      } else {
+        // رجع قبل الأربعين ثانية أو في صفحة خفيفة: البولينج بيرجع يشتغل تلقائيًا
+        // (listener المجتمع بيعمل startCommunityPolling() لو activeCommunityCourse موجود)
+        resetIdleTimer();
+      }
     }
   });
 });
