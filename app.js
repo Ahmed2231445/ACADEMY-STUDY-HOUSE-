@@ -857,10 +857,10 @@ function refreshAllEditorSwitchLabels() {
   /* ===== Community section ===== */
   let communityData = null;
   let communityPollTimer = null;
-  let communityPollDelay = 4000;
+  let communityPollDelay = 5000;
   let communityLastCount = -1;
-  const COMMUNITY_POLL_MIN = 4000;
-  const COMMUNITY_POLL_MAX = 15000;
+  const COMMUNITY_POLL_MIN = 5000;
+  const COMMUNITY_POLL_MAX = 120000; // أقصى فاصل دقيقتين لو مفيش رسايل جديدة
   let activeCommunityCourse = null;
 
   function getAllowedCommunityCourses() {
@@ -952,8 +952,8 @@ function refreshAllEditorSwitchLabels() {
 
       if (count !== communityLastCount) {
         communityPollDelay = COMMUNITY_POLL_MIN;
-      } else {
-        communityPollDelay = Math.min(communityPollDelay + 2000, COMMUNITY_POLL_MAX);
+} else {
+        communityPollDelay = Math.min(Math.round(communityPollDelay * 1.7), COMMUNITY_POLL_MAX);
       }
       communityLastCount = count;
 
@@ -2945,8 +2945,8 @@ document.addEventListener("contextmenu", function (e) {
    ====================================================== */
 
 (function () {
-  const CHECK_INTERVAL_MS = 120000; // كل دقيقتين، كافية لفحص الطرد كل 30 ثانية، غيّرها براحتك
-  let watcherTimer = null;
+const CHECK_INTERVAL_MS = 15 * 60 * 1000; // كل 15 دقيقة
+let watcherTimer = null;
 
   function isUserStillValid(creds, username, savedCourses) {
     const record = creds[username];
