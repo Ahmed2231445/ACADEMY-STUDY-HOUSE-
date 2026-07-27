@@ -51,6 +51,7 @@
     pointer-events:none;
   }
   .topbar > *{pointer-events:auto;}
+  .topbar-right{display:flex; align-items:center; gap:10px;}
   .brand{
     font-family:'Amiri', serif;
     font-weight:700;
@@ -83,8 +84,10 @@
   }
   .icon-btn.gold:hover{filter:brightness(1.08);}
   .icon-btn.danger{color:var(--danger); border-color:var(--danger);}
+  .icon-btn:disabled{opacity:.5; cursor:not-allowed;}
 
   #logoutBtn{display:none;}
+  #refreshBtn{display:none;}
 
   /* ===== Layout containers ===== */
   .screen{min-height:100vh; display:none; padding:100px 20px 60px;}
@@ -207,6 +210,12 @@
     color:var(--gold);
     font-size:12px;
     font-weight:700;
+  }
+  .data-status{
+    text-align:center;
+    font-size:11.5px;
+    color:var(--text-dim);
+    margin-top:10px;
   }
 
   .menu-grid{
@@ -478,7 +487,10 @@
 <body>
 
 <div class="topbar">
-  <button id="logoutBtn" class="icon-btn danger">⎋ تسجيل خروج</button>
+  <div class="topbar-right">
+    <button id="logoutBtn" class="icon-btn danger">⎋ تسجيل خروج</button>
+    <button id="refreshBtn" class="icon-btn">↻ تحديث</button>
+  </div>
   <button id="themeToggle" class="icon-btn gold">🎨 تبديل الألوان</button>
 </div>
 
@@ -511,6 +523,7 @@
   <div class="welcome">
     <h2 class="display-font">أهلاً، <span id="welcomeName"></span></h2>
     <div class="role-badge" id="roleBadge"></div>
+    <div class="data-status" id="dataStatus"></div>
   </div>
 
   <div class="menu-grid">
@@ -625,9 +638,16 @@
 const WEB_APP_URL = "https://script.google.com/macros/s/AKfycby9qouTV-TFhlGFeoc2Bfx4g0suSdKkR-B9LnRxv9GRkvqCTFn95uDX7D9ZJRWp6D_BSA/exec";
 const TEACHER_SECRET = "admin@333";
 
+// مدة صلاحية البيانات المخزّنة محليًا قبل ما نطلب تحديث من السيرفر (بالمللي ثانية)
+// طول ما الوقت ده لسه ما خلصش، هيتم استخدام البيانات المحفوظة في المتصفح
+// من غير أي طلب جديد للسيرفر (توفير في عدد الطلبات).
+const CACHE_TTL_MS = 2 * 60 * 1000; // دقيقتان
+const CACHE_KEY = 'platformDataCache';
+
 let currentUser = null; // {secret, display, isTeacher}
 let appData = {appointments:[], sessions:[]};
 const countdownTimers = {};
+let isLoadingData = false;
 
 /* =======================================================
    أدوات مساعدة
@@ -648,6 +668,21 @@ function esc(str){
   const d = document.createElement('div');
   d.textContent = str == null ? '' : String(str);
   return d.innerHTML;
+}
+
+function setDataStatus(text){
+  const el = document.getElementById('dataStatus');
+  if(el) el.textContent = text;
+}
+
+function timeAgoAr(ts){
+  const diffSec = Math.max(0, Math.floor((Date.now() - ts)/1000));
+  if(diffSec < 5) return 'الآن';
+  if(diffSec < 60) return `منذ ${diffSec} ثانية`;
+  const mins = Math.floor(diffSec/60);
+  if(mins < 60) return `منذ ${mins} ${mins===1?'دقيقة':'دقائق'}`;
+  const hrs = Math.floor(mins/60);
+  return `منذ ${hrs} ${hrs===1?'ساعة':'ساعات'}`;
 }
 
 /* =======================================================
@@ -700,6 +735,7 @@ document.getElementById('logoutBtn').addEventListener('click', ()=>{
   currentUser = null;
   sessionStorage.removeItem('platformUser');
   document.getElementById('logoutBtn').style.display = 'none';
+  document.getElementById('refreshBtn').style.display = 'none';
   document.getElementById('secretInput').value = '';
   document.getElementById('displayInput').value = '';
   document.getElementById('panelAppointments').classList.remove('active');
@@ -709,6 +745,7 @@ document.getElementById('logoutBtn').addEventListener('click', ()=>{
 
 function enterDashboard(){
   document.getElementById('logoutBtn').style.display = 'inline-flex';
+  document.getElementById('refreshBtn').style.display = 'inline-flex';
   document.getElementById('welcomeName').textContent = currentUser.display;
   const badge = document.getElementById('roleBadge');
   badge.textContent = currentUser.isTeacher ? 'المعلم' : 'طالب';
@@ -719,7 +756,7 @@ function enterDashboard(){
   showScreen('dashboardScreen');
   document.getElementById('panelAppointments').classList.remove('active');
   document.getElementById('panelSessions').classList.remove('active');
-  loadData();
+  loadData(false); // false = استخدم الكاش لو لسه صالح، ماتبعتش طلب جديد لو مش لازم
 }
 
 // استعادة الجلسة عند تحديث الصفحة
@@ -759,6 +796,13 @@ document.getElementById('toggleAddSession').addEventListener('click', ()=>{
 });
 
 /* =======================================================
+   زرار التحديث اليدوي
+======================================================= */
+document.getElementById('refreshBtn').addEventListener('click', ()=>{
+  loadData(true); // true = تجاهل الكاش وابعت طلب فعلي دلوقتي
+});
+
+/* =======================================================
    الاتصال بالسيرفر (Google Apps Script)
 ======================================================= */
 function callAPI(action, payload){
@@ -772,20 +816,70 @@ function callAPI(action, payload){
     .then(r=>r.json());
 }
 
-function loadData(){
+function readCache(){
+  try{
+    const raw = localStorage.getItem(CACHE_KEY);
+    if(!raw) return null;
+    const parsed = JSON.parse(raw);
+    if(!parsed || !parsed.data || !parsed.ts) return null;
+    return parsed;
+  }catch(e){ return null; }
+}
+
+function writeCache(data){
+  try{
+    localStorage.setItem(CACHE_KEY, JSON.stringify({data, ts: Date.now()}));
+  }catch(e){ /* تجاهل لو التخزين ممتلئ أو غير متاح */ }
+}
+
+// forceRefresh = true يعني "تجاهل الكاش وابعت طلب فعلي دلوقتي"
+// forceRefresh = false (الافتراضي) يعني "استخدم الكاش لو لسه صالح، وإلا ابعت طلب"
+function loadData(forceRefresh){
+  if(isLoadingData) return; // منع إرسال أكثر من طلب في نفس اللحظة
   if(WEB_APP_URL.indexOf('PASTE_YOUR') === 0){
     toast('لم يتم ربط الموقع بالسيرفر بعد');
     render();
     return;
   }
+
+  const cached = readCache();
+  const isFresh = cached && (Date.now() - cached.ts) < CACHE_TTL_MS;
+
+  // لو عندنا بيانات محفوظة، اعرضها فورًا (سواء كانت طازة أو لأ) عشان الشاشة توصل بسرعة
+  if(cached){
+    appData.appointments = cached.data.appointments || [];
+    appData.sessions = cached.data.sessions || [];
+    render();
+    setDataStatus(`آخر تحديث: ${timeAgoAr(cached.ts)}`);
+  }
+
+  // لو مش مطلوب تحديث إجباري، والبيانات المحفوظة لسه طازة → متبعتش أي طلب للسيرفر
+  if(!forceRefresh && isFresh){
+    return;
+  }
+
+  isLoadingData = true;
+  const refreshBtn = document.getElementById('refreshBtn');
+  if(refreshBtn){ refreshBtn.disabled = true; }
+  if(!cached){ setDataStatus('جارِ تحميل البيانات...'); }
+
   fetch(WEB_APP_URL)
     .then(r=>r.json())
     .then(data=>{
       appData.appointments = data.appointments || [];
       appData.sessions = data.sessions || [];
+      writeCache({appointments: appData.appointments, sessions: appData.sessions});
       render();
+      setDataStatus(`آخر تحديث: ${timeAgoAr(Date.now())}`);
     })
-    .catch(()=>{ toast('تعذر الاتصال بالسيرفر'); });
+    .catch(()=>{
+      if(!cached){ toast('تعذر الاتصال بالسيرفر'); }
+      else{ toast('تعذر تحديث البيانات، يتم عرض آخر نسخة محفوظة'); }
+    })
+    .finally(()=>{
+      isLoadingData = false;
+      if(refreshBtn){ refreshBtn.disabled = false; }
+    });
 }
 
 /* =======================================================
@@ -925,6 +1019,8 @@ document.getElementById('submitAppointment').addEventListener('click', ()=>{
       document.getElementById('apStudents').value='';
       document.getElementById('formAddAppointment').classList.remove('active');
       appData = res.data;
+      writeCache(res.data);
+      setDataStatus(`آخر تحديث: ${timeAgoAr(Date.now())}`);
       render();
     } else {
       toast(res.error || 'حدث خطأ');
@@ -938,6 +1034,8 @@ function deleteAppointment(id){
     if(res.success){
       toast('تم حذف الموعد');
       appData = res.data;
+      writeCache(res.data);
+      setDataStatus(`آخر تحديث: ${timeAgoAr(Date.now())}`);
       render();
     } else {
       toast(res.error || 'حدث خطأ');
@@ -975,6 +1073,8 @@ document.getElementById('submitSession').addEventListener('click', ()=>{
       document.getElementById('sesStudents').value='';
       document.getElementById('formAddSession').classList.remove('active');
       appData = res.data;
+      writeCache(res.data);
+      setDataStatus(`آخر تحديث: ${timeAgoAr(Date.now())}`);
       render();
     } else {
       toast(res.error || 'حدث خطأ');
@@ -988,6 +1088,8 @@ function deleteSession(id){
     if(res.success){
       toast('تم حذف الجلسة');
       appData = res.data;
+      writeCache(res.data);
+      setDataStatus(`آخر تحديث: ${timeAgoAr(Date.now())}`);
       render();
     } else {
       toast(res.error || 'حدث خطأ');
