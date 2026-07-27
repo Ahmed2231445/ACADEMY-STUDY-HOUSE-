@@ -503,19 +503,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const communityForm = document.querySelector("[data-community-form]");
   const communityInput = document.querySelector("[data-community-input]");
   const communitySendBtn = document.querySelector("[data-community-send]");
-  const QUOTA_CHECK_URL = COMMUNITY_DOC_EXPORT_URL + "?action=quotaStatus";
-  const QUOTA_THRESHOLD = 18000;
-  const QUOTA_CHECK_INTERVAL_MS = 5 * 60 * 1000; // فحص كل 5 دقايق
-  const QUOTA_ALLOWED_SECTIONS = ["home", "settings", "pronunciation", "session"];
-  const QUOTA_RESTRICTED_LINK_IDS = ["appCoursesLink", "appCommunityLink", "appExamLink"];
-  let quotaRestricted = false;
-  let quotaCheckTimer = null;
-  let quotaNoticeBanner = null;
-  const quotaStyle = document.createElement("style");
-  quotaStyle.textContent = `
-    .quota-disabled-link { opacity: 0.45 !important; cursor: not-allowed !important; }
-  `;
-  document.head.appendChild(quotaStyle);
 
   
 
@@ -1056,7 +1043,6 @@ function refreshAllEditorSwitchLabels() {
   if (appCommunityLink) {
     appCommunityLink.addEventListener("click", (e) => {
       e.preventDefault();
-      if (quotaRestricted) { showQuotaNotice(); return; }
       showAppSection("community");
       closeAppSidebar();
     });
@@ -1130,10 +1116,6 @@ function refreshAllEditorSwitchLabels() {
 let currentAppSection = null;
 
   function showAppSection(section) {
-    if (quotaRestricted && !QUOTA_ALLOWED_SECTIONS.includes(section)) {
-      showQuotaNotice();
-      section = "home";
-    }
     currentAppSection = section;
     const sectionsMap = {
       home: appHomeContent,
@@ -1191,7 +1173,6 @@ let currentAppSection = null;
   if (appCoursesLink) {
     appCoursesLink.addEventListener("click", (e) => {
       e.preventDefault();
-      if (quotaRestricted) { showQuotaNotice(); return; }
       showAppSection("courses");
       closeAppSidebar();
     });
@@ -1225,8 +1206,6 @@ let currentAppSection = null;
 
   function goToAppView(username) {
     if (username) appUsername.textContent = username;
-    checkQuotaStatus();
-    scheduleQuotaCheck();
     showAppSection("home");
     siteView.classList.add("view-leave");
     setTimeout(() => {
@@ -1329,13 +1308,6 @@ let currentAppSection = null;
 
   if (appLogout) {
     appLogout.addEventListener("click", () => {
-      clearTimeout(quotaCheckTimer);
-      quotaRestricted = false;
-      hideQuotaNotice();
-      QUOTA_RESTRICTED_LINK_IDS.forEach((id) => {
-        const el = document.getElementById(id);
-        if (el) el.classList.remove("quota-disabled-link");
-      });
       stopCommunityPolling();
       try {
         localStorage.removeItem("studyhouse-user");
@@ -2280,7 +2252,6 @@ const appPronunciationContent = document.getElementById("appPronunciationContent
   if (appExamLink) {
     appExamLink.addEventListener("click", (e) => {
       e.preventDefault();
-      if (quotaRestricted) { showQuotaNotice(); return; }
       showAppSection("exam");
       closeAppSidebar();
     });
@@ -2974,8 +2945,8 @@ document.addEventListener("contextmenu", function (e) {
    ====================================================== */
 
 (function () {
-const CHECK_INTERVAL_MS = 15 * 60 * 1000; // كل 15 دقيقة
-let watcherTimer = null;
+const CHECK_INTERVAL_MS = 15 * 60 * 1000; // كل 15 دقيقة  
+  let watcherTimer = null;
 
   function isUserStillValid(creds, username, savedCourses) {
     const record = creds[username];
@@ -3098,85 +3069,3 @@ let watcherTimer = null;
   window.stopUserWatcher = stopUserWatcher;
 })();
 console.log("Ahmed");
-function createQuotaNoticeBanner() {
-    const banner = document.createElement("div");
-    banner.id = "quotaNoticeBanner";
-    banner.style.cssText = `
-      position:fixed; top:0; left:0; right:0; z-index:99999;
-      background:linear-gradient(135deg,#e3a335,#c9821f);
-      color:#fff; text-align:center; padding:12px 16px;
-      font-weight:700; font-size:0.9rem; display:none;
-      box-shadow:0 6px 16px -8px rgba(0,0,0,0.4);
-    `;
-    document.body.appendChild(banner);
-    return banner;
-  }
-
-  function showQuotaNotice() {
-    if (!quotaNoticeBanner) quotaNoticeBanner = createQuotaNoticeBanner();
-    quotaNoticeBanner.textContent = isArabicNow()
-      ? "جارٍ إصلاح السيرفر، الأقسام المتاحة الآن: الرئيسية، الجلسة المباشرة، الإعدادات، والنطق فقط."
-      : "Server maintenance in progress, only Home, Live Session, Settings, and Pronunciation are available now.";
-    quotaNoticeBanner.style.display = "block";
-  }
-
-  function hideQuotaNotice() {
-    if (quotaNoticeBanner) quotaNoticeBanner.style.display = "none";
-  }
-function enterQuotaRestrictedMode() {
-    if (quotaRestricted) return;
-    quotaRestricted = true;
-
-    if (window.stopUserWatcher) window.stopUserWatcher();
-    stopCommunityPolling();
-
-    QUOTA_RESTRICTED_LINK_IDS.forEach((id) => {
-      const el = document.getElementById(id);
-      if (el) el.classList.add("quota-disabled-link");
-    });
-
-    if (currentAppSection && !QUOTA_ALLOWED_SECTIONS.includes(currentAppSection)) {
-      showAppSection("home");
-    }
-
-    showQuotaNotice();
-  }
-
-  function exitQuotaRestrictedMode() {
-    if (!quotaRestricted) return;
-    quotaRestricted = false;
-
-    QUOTA_RESTRICTED_LINK_IDS.forEach((id) => {
-      const el = document.getElementById(id);
-      if (el) el.classList.remove("quota-disabled-link");
-    });
-
-    hideQuotaNotice();
-
-    const username = getSavedUser();
-    if (username && window.startUserWatcher) window.startUserWatcher();
-  }
-async function checkQuotaStatus() {
-    try {
-      const res = await fetch(QUOTA_CHECK_URL, { cache: "no-store" });
-      if (!res.ok) return;
-      const data = await res.json();
-      const count = Number(data.count) || 0;
-
-      if (count >= QUOTA_THRESHOLD && !quotaRestricted) {
-        enterQuotaRestrictedMode();
-      } else if (count < QUOTA_THRESHOLD && quotaRestricted) {
-        exitQuotaRestrictedMode();
-      }
-    } catch (err) {
-      // فشل الفحص مؤقتًا، هيتم إعادة المحاولة في الجولة الجاية
-    }
-  }
-
-  function scheduleQuotaCheck() {
-    clearTimeout(quotaCheckTimer);
-    quotaCheckTimer = setTimeout(async () => {
-      await checkQuotaStatus();
-      scheduleQuotaCheck();
-    }, QUOTA_CHECK_INTERVAL_MS);
-  }
