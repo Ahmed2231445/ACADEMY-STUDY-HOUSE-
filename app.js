@@ -860,7 +860,7 @@ function refreshAllEditorSwitchLabels() {
   let communityPollDelay = 5000;
   let communityLastCount = -1;
   const COMMUNITY_POLL_MIN = 5000;
-  const COMMUNITY_POLL_MAX = 60000; // أقصى فاصل دقيقتين لو مفيش رسايل جديدة
+  const COMMUNITY_POLL_MAX = 30000; // أقصى فاصل دقيقتين لو مفيش رسايل جديدة
   let activeCommunityCourse = null;
 
   function getAllowedCommunityCourses() {
