@@ -907,7 +907,10 @@ function refreshAllEditorSwitchLabels() {
       bubble.textContent = msg.message;
       bubbleRow.appendChild(bubble);
 
-      if (isMine) {
+
+      if (msg.pending) wrap.style.opacity = "0.55";
+      
+      if (isMine && !msg.pending) {
         const delBtn = document.createElement("button");
         delBtn.type = "button";
         delBtn.className = "community-msg-delete";
@@ -1065,19 +1068,31 @@ function refreshAllEditorSwitchLabels() {
       const username = getSavedUser();
       if (!text || !username) return;
 
+      communityInput.value = "";
+
+      if (!communityData) communityData = { programming: [], arabic: [], other: [], english: [] };
+      if (!communityData[activeCommunityCourse]) communityData[activeCommunityCourse] = [];
+      const optimisticMsg = { username, message: text, pending: true };
+      communityData[activeCommunityCourse].push(optimisticMsg);
+      renderCommunityMessages(activeCommunityCourse);
+
       if (communitySendBtn) communitySendBtn.disabled = true;
       try {
         await sendCommunityMessage(activeCommunityCourse, username, text);
-        communityInput.value = "";
+        _requestCache.delete(COMMUNITY_DOC_EXPORT_URL);
         await refreshCommunity(true);
       } catch (err) {
+        const idx = communityData[activeCommunityCourse].indexOf(optimisticMsg);
+        if (idx !== -1) communityData[activeCommunityCourse].splice(idx, 1);
+        renderCommunityMessages(activeCommunityCourse);
+        communityInput.value = text;
         alert(isArabicNow() ? "تعذر إرسال الرسالة، حاول مرة أخرى" : "Couldn't send the message, try again");
       } finally {
         if (communitySendBtn) communitySendBtn.disabled = false;
         communityInput.focus();
       }
     });
-  }
+}
 
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
