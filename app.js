@@ -229,7 +229,7 @@ async function fetchLoginCredentials() {
 }
 
 const COMMUNITY_DOC_EXPORT_URL =
-  "https://script.google.com/macros/s/AKfycbzD0Tj6KYsT3XqNM7Sic0P0390uk3wpkUlKtpINFVFX1YkJqctRld95xu7Enklhnc63/exec";
+  "https://script.google.com/macros/s/AKfycbwRchJSsRmnVhLo9DInwoSox2d7s4m6vWfkECjUCIAZJ7T7l_ADHyY09AY2DyxwacLv/exec";
 
 function parseCommunityText(text) {
   const lines = text.split(/\r?\n/);
