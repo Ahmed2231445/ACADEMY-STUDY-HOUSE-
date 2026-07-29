@@ -270,7 +270,9 @@ function parseCommunityText(text) {
 }
 
 async function fetchCommunityMessages() {
-  const text = await cachedFetchText(COMMUNITY_DOC_EXPORT_URL, 4000);
+  const res = await fetch(COMMUNITY_DOC_EXPORT_URL, { cache: "no-store" });
+  if (!res.ok) throw new Error("تعذر تحميل الرسائل");
+  const text = await res.text();
   return parseCommunityText(text);
 }
 
@@ -857,10 +859,10 @@ function refreshAllEditorSwitchLabels() {
   /* ===== Community section ===== */
   let communityData = null;
   let communityPollTimer = null;
-  let communityPollDelay = 3000;
+  let communityPollDelay = 1000;
   let communityLastCount = -1;
-  const COMMUNITY_POLL_MIN = 3000;
-  const COMMUNITY_POLL_MAX = 7000; // أقصى فاصل دقيقتين لو مفيش رسايل جديدة
+  const COMMUNITY_POLL_MIN = 1000;
+  const COMMUNITY_POLL_MAX = 2000; // أقصى فاصل دقيقتين لو مفيش رسايل جديدة
   let activeCommunityCourse = null;
 
   function getAllowedCommunityCourses() {
