@@ -862,7 +862,7 @@ function refreshAllEditorSwitchLabels() {
   let communityPollDelay = 1000;
   let communityLastCount = -1;
   const COMMUNITY_POLL_MIN = 1000;
-  const COMMUNITY_POLL_MAX = 2000; // أقصى فاصل دقيقتين لو مفيش رسايل جديدة
+  const COMMUNITY_POLL_MAX = 9000; 
   let activeCommunityCourse = null;
 
   function getAllowedCommunityCourses() {
@@ -870,6 +870,10 @@ function refreshAllEditorSwitchLabels() {
     return allowedRaw.map((c) => COURSE_KEY_MAP[c]).filter(Boolean);
   }
 
+  function isCommunityChatOpen() {
+  return currentAppSection === "community" && !!activeCommunityCourse;
+}
+  
   function isScrolledToBottom(el) {
     if (!el) return true;
     return el.scrollHeight - el.scrollTop - el.clientHeight < 40;
@@ -1097,12 +1101,12 @@ function refreshAllEditorSwitchLabels() {
 }
 
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) {
-      stopCommunityPolling();
-    } else if (activeCommunityCourse) {
-      startCommunityPolling();
-    }
-  });
+  if (document.hidden) {
+    stopCommunityPolling();
+  } else if (isCommunityChatOpen()) {
+    startCommunityPolling();
+  }
+});
 
   let teachersLoaded = false;
 
@@ -2686,8 +2690,8 @@ if (appPronunciationLink) {
   updateAIPulseText();
 
   /* ===== نظام قفل الموقع عند عدم النشاط (فقط في الأقسام المستهلكة للطلبات) ===== */
-  const IDLE_LOCK_MS = 40000;
-  const HIDDEN_LOCK_MS = 40000;
+  const IDLE_LOCK_MS = 25000;
+  const HIDDEN_LOCK_MS = 25000;
   let idleLockTimer = null;
   let hiddenLockTimer = null;
   let siteLocked = false;
@@ -2699,8 +2703,8 @@ if (appPronunciationLink) {
 
   // القسم يعتبر "ثقيل" (بيستهلك طلبات بشكل مستمر) لو المستخدم فاتح شات مجتمع فعليًا
   function isRequestHeavySection() {
-    return !!activeCommunityCourse;
-  }
+  return isCommunityChatOpen();
+}
 
   function createIdleLockOverlay() {
     const overlay = document.createElement("div");
@@ -2716,7 +2720,7 @@ if (appPronunciationLink) {
         <div style="font-size:2.4rem; margin-bottom:14px;">⏸️</div>
         <h2 style="margin:0 0 10px; font-size:1.25rem;">تم إيقاف الجلسة مؤقتًا</h2>
         <p style="margin:0 0 22px; color:#d6cdc4; line-height:1.7; font-size:0.92rem;">
-          لعدم وجود أي نشاط، تم إيقاف الاتصال بالسيرفر لحماية الموقع.
+          لعدم وجود أي نشاط، تم إيقاف الاتصال بالسيرفر لحماية الموقع.وللعلم المجتمع لكتابة الرسائل المهمة فقط وليس للعب او الدردشة
           اضغط الزر للمتابعة.
         </p>
         <button id="idleLockReloadBtn" style="
